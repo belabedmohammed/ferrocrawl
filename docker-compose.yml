@@ -1,0 +1,24 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3400:3400"
+    environment:
+      FERROCRAWL_HOST: "0.0.0.0"
+      FERROCRAWL_PORT: "3400"
+      FERROCRAWL_TIMEOUT_SECS: "30"
+      FERROCRAWL_CACHE_TTL: "300"
+      FERROCRAWL_CACHE_MAX: "500"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+      FERROCRAWL_API_KEYS: "${FERROCRAWL_API_KEYS:-}"
+      RUST_LOG: "ferrocrawl=debug,tower_http=debug"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3400/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

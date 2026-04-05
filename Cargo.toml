@@ -1,0 +1,62 @@
+[package]
+name = "ferrocrawl"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance web scraping and data extraction REST API built in Rust"
+license = "MIT"
+
+[[bin]]
+name = "ferrocrawl"
+path = "src/main.rs"
+
+[[bin]]
+name = "local-server"
+path = "src/local.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "limit"] }
+
+# AWS Lambda
+lambda_http = "0.13"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "cookies"] }
+
+# HTML parsing & markdown
+scraper = "0.20"
+ego-tree = "0.6"
+htmd = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Config
+dotenvy = "0.15"
+
+# Error handling
+thiserror = "2"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = { version = "2", features = ["serde"] }
+regex = "1"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

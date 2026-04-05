@@ -1,0 +1,19 @@
+# Rust build
+/target
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.log
+*.pdb

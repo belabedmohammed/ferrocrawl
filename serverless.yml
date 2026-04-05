@@ -1,0 +1,57 @@
+service: ferrocrawl
+
+frameworkVersion: "4"
+
+provider:
+  name: aws
+  runtime: provided.al2023
+  architecture: arm64
+  region: us-east-1
+  stage: ${opt:stage, 'prod'}
+  memorySize: 256
+  timeout: 29
+  logRetentionInDays: 30
+  environment:
+    RUST_LOG: ferrocrawl=info
+    # Shared Anthropic key from Davoxi SSM (same key used across all services)
+    ANTHROPIC_API_KEY: ${ssm:/ai-phone-agent-rust/${self:provider.stage}/anthropic-api-key, ''}
+    ANTHROPIC_MODEL: ${ssm:/ferrocrawl/${self:provider.stage}/anthropic-model, 'claude-sonnet-4-20250514'}
+    FERROCRAWL_API_KEYS: ${ssm:/ferrocrawl/${self:provider.stage}/api-keys, ''}
+    FERROCRAWL_TIMEOUT_SECS: "25"
+    FERROCRAWL_MAX_BODY_SIZE: "5242880"
+    FERROCRAWL_CACHE_TTL: "300"
+    FERROCRAWL_CACHE_MAX: "500"
+  httpApi:
+    cors:
+      allowedOrigins:
+        - "*"
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - POST
+        - GET
+        - OPTIONS
+
+package:
+  individually: true
+
+functions:
+  api:
+    handler: bootstrap
+    description: "Ferrocrawl - Web scraping and data extraction API"
+    package:
+      artifact: target/lambda/ferrocrawl/bootstrap.zip
+    events:
+      - httpApi:
+          method: GET
+          path: /health
+      - httpApi:
+          method: POST
+          path: /v1/scrape
+      - httpApi:
+          method: POST
+          path: /v1/extract
+      - httpApi:
+          method: OPTIONS
+          path: /{proxy+}

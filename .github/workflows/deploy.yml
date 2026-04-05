@@ -1,0 +1,177 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Deployment stage"
+        required: true
+        default: "prod"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  STAGE: ${{ github.event.inputs.stage || 'prod' }}
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run tests
+        run: cargo test
+
+  deploy:
+    name: Deploy (${{ github.event.inputs.stage || 'prod' }})
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-lambda
+        run: pip3 install cargo-lambda
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lambda-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lambda-
+
+      - name: Clean stale lambda artifacts
+        run: rm -rf target/lambda
+
+      - name: Build Lambda binary (ARM64)
+        run: cargo lambda build --release --arm64 --bin ferrocrawl
+
+      - name: Verify binary exists
+        run: |
+          ls -la target/lambda/ferrocrawl/bootstrap
+          file target/lambda/ferrocrawl/bootstrap
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync secrets to SSM
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FERROCRAWL_API_KEYS: ${{ secrets.FERROCRAWL_API_KEYS }}
+        run: |
+          # Sync Anthropic key to shared Davoxi SSM path (used by all services)
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            aws ssm put-parameter \
+              --name "/ai-phone-agent-rust/${{ env.STAGE }}/anthropic-api-key" \
+              --value "$ANTHROPIC_API_KEY" \
+              --type SecureString \
+              --overwrite 2>/dev/null || true
+            echo "Synced /ai-phone-agent-rust/${{ env.STAGE }}/anthropic-api-key"
+          fi
+
+          # Sync ferrocrawl-specific secrets
+          if [ -n "$FERROCRAWL_API_KEYS" ]; then
+            aws ssm put-parameter \
+              --name "/ferrocrawl/${{ env.STAGE }}/api-keys" \
+              --value "$FERROCRAWL_API_KEYS" \
+              --type SecureString \
+              --overwrite 2>/dev/null || true
+            echo "Synced /ferrocrawl/${{ env.STAGE }}/api-keys"
+          fi
+
+          # Set default Anthropic model
+          aws ssm put-parameter \
+            --name "/ferrocrawl/${{ env.STAGE }}/anthropic-model" \
+            --value "claude-sonnet-4-20250514" \
+            --type String \
+            --overwrite 2>/dev/null || true
+          echo "Synced /ferrocrawl/${{ env.STAGE }}/anthropic-model"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless@4
+
+      - name: Deploy
+        run: serverless deploy --stage ${{ env.STAGE }} --verbose
+
+      - name: Get API URL
+        id: api-url
+        run: |
+          URL=$(serverless info --stage ${{ env.STAGE }} --verbose 2>&1 | grep -oP 'https://[^\s]+' | head -1)
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "API URL: $URL"
+
+      - name: Smoke test
+        run: |
+          URL="${{ steps.api-url.outputs.url }}"
+          if [ -z "$URL" ]; then
+            echo "Could not extract URL, skipping smoke test"
+            exit 0
+          fi
+
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" 2>/dev/null || echo "000")
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed"
+              curl -s "$URL/health"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Health check failed after 5 attempts"
+          exit 1
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "## Ferrocrawl Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | \`${{ env.STAGE }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| API URL | ${{ steps.api-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
