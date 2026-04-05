@@ -1,8 +1,8 @@
-mod static_scraper;
 mod content_cleaner;
+mod static_scraper;
 
-pub use static_scraper::StaticScraper;
 pub use content_cleaner::ContentCleaner;
+pub use static_scraper::StaticScraper;
 
 use serde::Serialize;
 

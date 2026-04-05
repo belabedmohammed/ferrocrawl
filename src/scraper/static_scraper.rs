@@ -76,7 +76,10 @@ impl StaticScraper {
         let response = self
             .client
             .get(url)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
             .header("Accept-Language", "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7")
             .send()
             .await?;
@@ -283,9 +286,7 @@ mod tests {
                 api_key: None,
                 model: "test".into(),
             },
-            auth: crate::config::AuthConfig {
-                api_keys: vec![],
-            },
+            auth: crate::config::AuthConfig { api_keys: vec![] },
         };
         StaticScraper::new(&config).unwrap()
     }
